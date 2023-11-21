@@ -74,7 +74,7 @@ remote_memory = RemoteChanneledMemory(
 
 # Here we setup the processor. We use a simple processor.
 processor = SimpleProcessor(
-    cpu_type=CPUTypes.ATOMIC, isa=ISA.ARM, num_cores=2
+    cpu_type=CPUTypes.TIMING, isa=ISA.ARM, num_cores=2
 )
 
 board = ArmDMBoard(
@@ -86,19 +86,19 @@ board = ArmDMBoard(
 )
 
 cmd = [
-    "echo 'running mount -t sysfs - /sys`;",
+    "echo running mount -t sysfs - /sys;",
     "mount -t sysfs - /sys;",
-    "echo 'running mount -t proc - /proc`;",
+    "echo running mount -t proc - /proc;",
     "mount -t proc - /proc;",
-    "echo 'running numastat`;",
+    "echo running numastat;",
     "numastat;",
     "sysctl kernel.numa_balancing=1;"
-    "echo 'cat numa_balancing';",
+    "echo cat numa_balancing;",
     "cat /proc/sys/kernel/numa_balancing;",
-    "echo 'write vmstat to host';",
+    "echo write vmstat to host;",
     "cat /proc/vmstat > init_vmstat.txt;",
     "m5 writefile init_vmstat.txt;",
-    f"echo 'run {args.bench}.A.x';",
+    f"echo run {args.bench}.A.x;",
     "m5 workbegin;",
     f"/home/ubuntu/NPB/NPB3.4-OMP/bin/{args.bench}.A.x;",
     "cat /proc/vmstat > end_vmstat.txt;",

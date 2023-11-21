@@ -116,41 +116,6 @@ class ArmDMBoard(ArmBoard):
     def get_remote_mem_ports(self) -> Sequence[Tuple[AddrRange, Port]]:
         return self.get_remote_memory().get_mem_ports()
     
-    @overrides(AbstractSystemBoard)
-    def _setup_memory_ranges(self):
-
-        # the memory has to be setup for both the memory ranges. there is one
-        # local memory range, close to the host machine and the other range is
-        # pure memory, far from the host.
-        local_memory = self.get_local_memory()
-        remote_memory = self.get_remote_memory()
-
-        local_mem_size = local_memory.get_size()
-        remote_mem_size = remote_memory.get_size()
-
-
-        self._local_mem_ranges = [
-            AddrRange(start=0x80000000, size=local_mem_size)
-        ]
-
-        # The remote memory starts where the local memory ends. Therefore it
-        # has to be offset by the local memory's size.
-        self._remote_mem_ranges = [
-            AddrRange(start=0x80000000 + local_mem_size, size=remote_mem_size)
-        ]
-
-        # using a _global_ memory range to keep a track of all the memory
-        # ranges. This is used to generate the dtb for this machine
-        self._global_mem_ranges = []
-        self._global_mem_ranges.append(self._local_mem_ranges[0])
-        self._global_mem_ranges.append(self._remote_mem_ranges[0])
-
-        self.__global_size = local_mem_size
-        self.__global_size += remote_mem_size
-
-        # setting the memory ranges for both of the memory ranges.
-        local_memory.set_memory_range(self._local_mem_ranges)
-        remote_memory.set_memory_range(self._remote_mem_ranges)
 
     @overrides(ArmBoard)
     def _setup_board(self) -> None:
@@ -206,24 +171,66 @@ class ArmDMBoard(ArmBoard):
         # # sets up all the memory ranges for the board.
         # self.mem_ranges = []
         # success = False
-        # # self.mem_ranges.append(self.get_remote_memory_addr_range())
-        # for mem_range in self.realview._mem_regions:
-        #     size_in_range = min(mem_size, mem_range.size())
-        #     self.mem_ranges.append(
-        #         AddrRange(start=mem_range.start, size=size_in_range)
-        #     )
-
-        #     mem_size -= size_in_range
-        #     if mem_size == 0:
-        #         success = True
-        #         break
-
-        # if success:
-        #     memory.set_memory_range(self.mem_ranges)
-        # else:
-        #     raise ValueError("Memory size too big for platform capabilities")
+        # self.mem_ranges.append(self.get_remote_memory_addr_range())
 
         # self.mem_ranges.append(self.get_remote_memory_addr_range())
+
+        local_memory = self.get_local_memory()
+        remote_memory = self.get_remote_memory()
+
+        local_mem_size = local_memory.get_size()
+        remote_mem_size = remote_memory.get_size()
+
+        # self._local_mem_ranges = [
+        #     AddrRange(start=0x80000000, size=local_mem_size)
+        # ]
+
+        # # The remote memory starts where the local memory ends. Therefore it
+        # # has to be offset by the local memory's size.
+        # self._remote_mem_ranges = [
+        #     AddrRange(start=0x80000000 + local_mem_size, size=remote_mem_size)
+        # ]
+        self._local_mem_ranges  = []
+        self._remote_mem_ranges = []
+        # using a _global_ memory range to keep a track of all the memory
+        # ranges. This is used to generate the dtb for this machine
+
+        self.__global_size = local_mem_size
+        self.__global_size += remote_mem_size
+
+        print(local_mem_size)
+        print(remote_mem_size)
+        print(self.clk_domain)
+
+        success = False
+
+        for mem_range in self.realview._mem_regions:
+            local_size_in_range = min(local_mem_size, mem_range.size())
+            self._local_mem_ranges.append(
+                AddrRange(start=mem_range.start, size=local_size_in_range)
+            )
+            local_mem_size -= local_size_in_range
+            
+            remote_size_in_range = min(remote_mem_size, mem_range.size())
+            self._remote_mem_ranges.append(
+                AddrRange(start=mem_range.start + local_size_in_range, size=remote_size_in_range)
+            )
+            remote_mem_size -= remote_size_in_range
+
+            if local_mem_size + remote_mem_size == 0:
+                success = True
+                break
+
+        if success:
+            local_memory.set_memory_range(self._local_mem_ranges)
+            remote_memory.set_memory_range(self._remote_mem_ranges)
+            self._global_mem_ranges = self._local_mem_ranges
+            self._global_mem_ranges.append(self._remote_mem_ranges[0])
+            self.mem_ranges = self._global_mem_ranges
+
+        else:
+            raise ValueError("Memory size too big for platform capabilities")
+        
 
         # The PCI Devices. PCI devices can be added via the `_add_pci_device`
         # function.
@@ -281,6 +288,7 @@ class ArmDMBoard(ArmBoard):
             "norandmaps",
             "root={root_value}",
             "rw",
+            # f'mem={self.__global_size}'
         ]
     
     @overrides(AbstractBoard)

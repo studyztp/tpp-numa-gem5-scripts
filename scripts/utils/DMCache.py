@@ -64,10 +64,15 @@ class ClassicPL1PL2DMCache(PrivateL1PrivateL2CacheHierarchy):
         # Set up the system port for functional access from the simulator.
         board.connect_system_port(self.membus.cpu_side_ports)
 
+        # for _, port in board.get_mem_ports():
+        #     self.membus.mem_side_ports = port
+
+        # for _, port in board.get_remote_mem_ports():
+        #     self.membus.mem_side_ports = port
+
         for cntr in board.get_local_memory().get_memory_controllers():
             cntr.port = self.membus.mem_side_ports
 
-        # comment these lines for SST caches
         for cntr in board.get_remote_memory().get_memory_controllers():
             cntr.port = self.membus.mem_side_ports
 

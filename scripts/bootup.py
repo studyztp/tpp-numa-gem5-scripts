@@ -47,44 +47,61 @@ from gem5.components.cachehierarchies.classic.no_cache import NoCache
 # Here we setup the parameters of the l1 and l2 caches.
 from utils.DMCache import ClassicPL1PL2DMCache
 
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--core-type",
+    type=str,
+    choices=["kvm","atomic"],
+    default="atomic",
+    help="core type",
+)
+
+args = parser.parse_args()
+
 # Here we setup the parameters of the l1 and l2 caches.
-# cache_hierarchy = ClassicPL1PL2DMCache(
-#     l1d_size="32kB",
-#     l1i_size="32kB",
-#     l2_size="256kB"
-# )
-cache_hierarchy = NoCache()
+cache_hierarchy = ClassicPL1PL2DMCache(
+    l1d_size="32kB",
+    l1i_size="32kB",
+    l2_size="256kB"
+)
+# cache_hierarchy = NoCache()
 
 # Memory: Dual Channel DDR4 2400 DRAM device.
 
-local_memory = DualChannelDDR4_2400(size="256MB")
-remote_memory = RemoteChanneledMemory(
-        DDR4_2400_8x8,
-        2,
-        64,
-        size="8GB",
-        remote_offset_latency=750
-)
+local_memory = DualChannelDDR4_2400(size="512MB")
+remote_memory = SingleChannelDDR4_2400(size="8GB")
+# remote_memory = RemoteChanneledMemory(
+#         DDR4_2400_8x8,
+#         2,
+#         64,
+#         size="8GB",
+#         remote_offset_latency=750
+# )
 
 # Here we setup the processor. We use a simple processor.
-processor = SimpleProcessor(
-    cpu_type=CPUTypes.KVM, isa=ISA.ARM, num_cores=2
-)
+if args.core_type == "kvm":
+    processor = SimpleProcessor(
+        cpu_type=CPUTypes.KVM, isa=ISA.ARM, num_cores=1
+    )
+else:
+    processor = SimpleProcessor(
+        cpu_type=CPUTypes.ATOMIC, isa=ISA.ARM, num_cores=1
+    )
 
-board = ArmBoard(
-    clk_freq="3GHz",
-    processor=processor,
-    memory = DualChannelDDR4_2400(size="256MB"),
-    cache_hierarchy=cache_hierarchy,
-)
-
-# board = ArmDMBoard(
+# board = ArmBoard(
 #     clk_freq="3GHz",
 #     processor=processor,
-#     local_memory=local_memory,
-#     remote_memory=remote_memory,
+#     memory = DualChannelDDR4_2400(size="256MB"),
 #     cache_hierarchy=cache_hierarchy,
 # )
+
+board = ArmDMBoard(
+    clk_freq="3GHz",
+    processor=processor,
+    local_memory=local_memory,
+    remote_memory=remote_memory,
+    cache_hierarchy=cache_hierarchy,
+)
 
 board.set_kernel_disk_workload(
     kernel=KernelResource("/scr/studyztp/experiments/dm/disk/kg-5-18-vmlinux"),
@@ -97,7 +114,7 @@ board.set_kernel_disk_workload(
 
 def cpt_handler():
     print("got to m5 checkpoint")
-    m5.checkpoint(Path("/scr/studyztp/experiments/dm/bootup-cpt").as_posix())
+    m5.checkpoint(Path("/scr/studyztp/experiments/dm/atomic-bootup-cpt").as_posix())
     yield True
 
 simulator = Simulator(
