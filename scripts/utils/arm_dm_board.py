@@ -25,6 +25,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from m5.objects import (
+    Port,
     AddrRange,
     VoltageDomain,
     SrcClockDomain,
@@ -33,10 +34,8 @@ from m5.objects import (
     IOXBar,
     BadAddr,
     ArmSystem,
-    Port,
-    NoncoherentXBar
 )
-from gem5.components.boards.abstract_board import AbstractBoard
+
 from m5.objects.RealView import VExpress_GEM5_Base, VExpress_GEM5_Foundation
 from m5.objects.ArmSystem import ArmRelease, ArmDefaultRelease
 from m5.objects.ArmFsWorkload import ArmFsLinux
@@ -49,7 +48,7 @@ from m5.util.fdthelper import (
     FdtPropertyWords,
     FdtState,
 )
-from gem5.components.boards.abstract_system_board import AbstractSystemBoard
+
 import os
 import m5
 from abc import ABCMeta
@@ -64,7 +63,18 @@ from gem5.utils.override import overrides
 from typing import List, Sequence, Tuple
 
 
-class ArmDMBoard(ArmBoard):
+class ArmAbstractDMBoard(ArmBoard):
+    """
+    A high-level ARM board that can zNUMA-capable systems with a remote
+    memories. This board is extended from the ArmBoard from Gem5 standard
+    library. This board assumes that you will be booting Linux. This board can
+    be used to do disaggregated ARM system research while accelerating the
+    simulation using kvm.
+
+    **Limitations**
+    * kvm is only supported in a gem5-only setup.
+    """
+
     __metaclass__ = ABCMeta
 
     def __init__(
@@ -73,13 +83,17 @@ class ArmDMBoard(ArmBoard):
         processor: AbstractProcessor,
         local_memory: AbstractMemorySystem,
         cache_hierarchy: AbstractCacheHierarchy,
-        remote_memory: AbstractMemorySystem,
+        remote_memory_addr_range: AddrRange,
         platform: VExpress_GEM5_Base = VExpress_GEM5_Foundation(),
         release: ArmRelease = ArmDefaultRelease(),
     ) -> None:
-
+        # The structure of this board is similar to the RISCV DM board.
         self._localMemory = local_memory
-        self._remoteMemory = remote_memory
+        # remote_memory can either be an interface or an external memory
+        # This abstract disaggregated memory does not know what this type of
+        # memory is. it only needs to know the address range for this memory.
+        # from this range, we'll figure out the size.
+        self._remoteMemoryAddrRange = remote_memory_addr_range
         super().__init__(
             clk_freq=clk_freq,
             processor=processor,
@@ -88,8 +102,9 @@ class ArmDMBoard(ArmBoard):
             platform=platform,
             release=release,
         )
+        self.local_memory = local_memory
 
-    @overrides(AbstractSystemBoard)
+    @overrides(ArmBoard)
     def get_memory(self) -> "AbstractMemory":
         """Get the memory (RAM) connected to the board.
 
@@ -105,17 +120,33 @@ class ArmDMBoard(ArmBoard):
 
     def get_remote_memory(self) -> "AbstractMemory":
         """Get the memory (RAM) connected to the board.
+            This has to be implemeted by the child class as we don't know if
+            this board is simulating Gem5 memory or some external simulator
+            memory.
         :returns: The remote memory system.
         """
-        return self._remoteMemory
-    
-    @overrides(AbstractSystemBoard)
+        raise NotImplementedError
+
+    def get_remote_memory_size(self) -> "str":
+        """Get the remote memory size to setup the NUMA nodes."""
+        return self._remoteMemoryAddrRange.size()
+
+    @overrides(ArmBoard)
     def get_mem_ports(self) -> Sequence[Tuple[AddrRange, Port]]:
         return self.get_local_memory().get_mem_ports()
 
     def get_remote_mem_ports(self) -> Sequence[Tuple[AddrRange, Port]]:
-        return self.get_remote_memory().get_mem_ports()
-    
+        """Get the memory (RAM) ports connected to the board.
+            This has to be implemeted by the child class as we don't know if
+            this board is simulating Gem5 memory or some external simulator
+            memory.
+        :returns: A tuple of mem_ports.
+        """
+        raise NotImplementedError
+
+    def get_remote_memory_addr_range(self):
+        raise NotImplementedError
+        return self._remote_memory_range
 
     @overrides(ArmBoard)
     def _setup_board(self) -> None:
@@ -164,77 +195,43 @@ class ArmDMBoard(ArmBoard):
         # Once the realview is setup, we can continue setting up the memory
         # ranges. ArmBoard's memory can only be setup once realview is
         # initialized.
-        # memory = self.get_local_memory()
-        # mem_size = memory.get_size()
-
-        # # The following code is taken from configs/example/arm/devices.py. It
-        # # sets up all the memory ranges for the board.
-        # self.mem_ranges = []
-        # success = False
-        # self.mem_ranges.append(self.get_remote_memory_addr_range())
-
-        # self.mem_ranges.append(self.get_remote_memory_addr_range())
-
         local_memory = self.get_local_memory()
-        remote_memory = self.get_remote_memory()
+        mem_size = local_memory.get_size()
 
-        local_mem_size = local_memory.get_size()
-        remote_mem_size = remote_memory.get_size()
-
-        # self._local_mem_ranges = [
-        #     AddrRange(start=0x80000000, size=local_mem_size)
-        # ]
-
-        # # The remote memory starts where the local memory ends. Therefore it
-        # # has to be offset by the local memory's size.
-        # self._remote_mem_ranges = [
-        #     AddrRange(start=0x80000000 + local_mem_size, size=remote_mem_size)
-        # ]
-        self._local_mem_ranges  = []
-        self._remote_mem_ranges = []
-        # using a _global_ memory range to keep a track of all the memory
-        # ranges. This is used to generate the dtb for this machine
-
-        self.__global_size = local_mem_size
-        self.__global_size += remote_mem_size
-
-        print(local_mem_size)
-        print(remote_mem_size)
-        print(self.clk_domain)
-
+        # The following code is taken from configs/example/arm/devices.py. It
+        # sets up all the memory ranges for the board.
+        self.mem_ranges = []
         success = False
-
+        # self.mem_ranges.append(self.get_remote_memory_addr_range())
         for mem_range in self.realview._mem_regions:
-            local_size_in_range = min(local_mem_size, mem_range.size())
-            self._local_mem_ranges.append(
-                AddrRange(start=mem_range.start, size=local_size_in_range)
+            size_in_range = min(mem_size, mem_range.size())
+            self.mem_ranges.append(
+                AddrRange(start=mem_range.start, size=size_in_range)
             )
-            local_mem_size -= local_size_in_range
-            
-            remote_size_in_range = min(remote_mem_size, mem_range.size())
-            self._remote_mem_ranges.append(
-                AddrRange(start=mem_range.start + local_size_in_range, size=remote_size_in_range)
-            )
-            remote_mem_size -= remote_size_in_range
 
-            if local_mem_size + remote_mem_size == 0:
+            mem_size -= size_in_range
+            if mem_size == 0:
                 success = True
                 break
 
         if success:
-            local_memory.set_memory_range(self._local_mem_ranges)
-            remote_memory.set_memory_range(self._remote_mem_ranges)
-            self._global_mem_ranges = self._local_mem_ranges
-            self._global_mem_ranges.append(self._remote_mem_ranges[0])
-            self.mem_ranges = self._global_mem_ranges
-
+            print("local", self.mem_ranges[0])
+            local_memory.set_memory_range(self.mem_ranges)
         else:
             raise ValueError("Memory size too big for platform capabilities")
-        
+        # At the end of the local_memory, append the remote memory range.
+        print(self._remoteMemoryAddrRange)
+        self.mem_ranges.append(self._remoteMemoryAddrRange)
 
         # The PCI Devices. PCI devices can be added via the `_add_pci_device`
         # function.
         self._pci_devices = []
+
+        # set remtoe memory in the child board
+        self._set_remote_memory_ranges()
+
+    def _set_remote_memory_ranges(self):
+        raise NotImplementedError
 
     @overrides(ArmSystem)
     def generateDeviceTree(self, state):
@@ -262,11 +259,9 @@ class ArmDMBoard(ArmBoard):
         root.append(state.sizeCellsProperty())
 
         # Add memory nodes
-        # for mem_range in self._local_mem_ranges:
-        #     root.append(generateMemNode(0, mem_range))
-        # root.append(generateMemNode(1, self._remote_mem_ranges[0]))
-        for idx, mem_range in enumerate(self._global_mem_ranges):
-            root.append(generateMemNode(idx, mem_range))
+        for mem_range in self.mem_ranges:
+            root.append(generateMemNode(0, mem_range))
+        root.append(generateMemNode(1, self._remoteMemoryAddrRange))
 
         for node in self.recurseDeviceTree(state):
             # Merge root nodes instead of adding them (for children
@@ -288,54 +283,4 @@ class ArmDMBoard(ArmBoard):
             "norandmaps",
             "root={root_value}",
             "rw",
-            # f'mem={self.__global_size}'
         ]
-    
-    @overrides(AbstractBoard)
-    def _connect_things(self) -> None:
-        """Connects all the components to the board.
-
-        The order of this board is always:
-
-        1. Connect the memory.
-        2. Connect the cache hierarchy.
-        3. Connect the processor.
-
-        Developers may build upon this assumption when creating components.
-
-        Notes
-        -----
-
-        * The processor is incorporated after the cache hierarchy due to a bug
-        noted here: https://gem5.atlassian.net/browse/GEM5-1113. Until this
-        bug is fixed, this ordering must be maintained.
-        * Once this function is called `_connect_things_called` *must* be set
-        to `True`.
-        """
-
-        if self._connect_things_called:
-            raise Exception(
-                "The `_connect_things` function has already been called."
-            )
-
-        # Incorporate the memory into the motherboard.
-        self.get_local_memory().incorporate_memory(self)
-        self.get_remote_memory().incorporate_memory(self)
-
-        # Incorporate the cache hierarchy for the motherboard.
-        if self.get_cache_hierarchy():
-            self.get_cache_hierarchy().incorporate_cache(self)
-
-        # Incorporate the processor into the motherboard.
-        self.get_processor().incorporate_processor(self)
-
-        self._connect_things_called = True
-
-    @overrides(AbstractBoard)
-    def _post_instantiate(self):
-        """Called to set up anything needed after m5.instantiate"""
-        self.get_processor()._post_instantiate()
-        if self.get_cache_hierarchy():
-            self.get_cache_hierarchy()._post_instantiate()
-        self.get_local_memory()._post_instantiate()
-        self.get_remote_memory()._post_instantiate()

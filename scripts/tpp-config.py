@@ -32,15 +32,17 @@ from gem5.components.boards.arm_board import ArmBoard
 from gem5.components.memory import DualChannelDDR4_2400
 from gem5.components.memory import SingleChannelDDR4_2400
 from gem5.components.processors.simple_processor import SimpleProcessor
+from gem5.components.processors.simple_switchable_processor import SimpleSwitchableProcessor
 from gem5.components.processors.cpu_types import CPUTypes
 from gem5.isas import ISA
 from gem5.simulate.simulator import Simulator
 from gem5.simulate.simulator import ExitEvent
 from gem5.resources.resource import Resource, AbstractResource, DiskImageResource, KernelResource,obtain_resource
 from pathlib import Path
-from utils.NumaArmBoard import ArmDMBoard
 from gem5.components.memory.dram_interfaces.ddr4 import DDR4_2400_8x8
-from utils.RemoteMemory import RemoteChanneledMemory
+from utils.remote_memory import RemoteChanneledMemory
+from utils.dm_caches import ClassicPL1PL2DMCache
+from utils.arm_gem5_board import ArmGem5DMBoard
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -52,7 +54,6 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-from utils.DMCache import ClassicPL1PL2DMCache
 
 # Here we setup the parameters of the l1 and l2 caches.
 cache_hierarchy = ClassicPL1PL2DMCache(
@@ -74,10 +75,12 @@ remote_memory = RemoteChanneledMemory(
 
 # Here we setup the processor. We use a simple processor.
 processor = SimpleProcessor(
-    cpu_type=CPUTypes.TIMING, isa=ISA.ARM, num_cores=2
+    cpu_type=CPUTypes.TIMING, 
+    isa=ISA.ARM, 
+    num_cores=1
 )
 
-board = ArmDMBoard(
+board = ArmGem5DMBoard(
     clk_freq="3GHz",
     processor=processor,
     local_memory=local_memory,
@@ -92,6 +95,7 @@ cmd = [
     "mount -t proc - /proc;",
     "echo running numastat;",
     "numastat;",
+    "sysctl kernel.numa_balancing=2;"
     "echo cat numa_balancing;",
     "cat /proc/sys/kernel/numa_balancing;",
     "echo write vmstat to host;",
@@ -117,11 +121,6 @@ board.set_kernel_disk_workload(
     checkpoint=Path("/scr/studyztp/experiments/dm/bootup-cpt")
 )
 
-def take_cpt():
-    print("reach m5 checkpoint\n")
-    m5.checkpoint(args.cpt_path)
-    yield False
-
 def workbegin_handler():
     print("reach first workbegin\nreset stats\n")
     m5.stats.reset()
@@ -143,7 +142,6 @@ simulator = Simulator(
     on_exit_event = {
         ExitEvent.WORKBEGIN : workbegin_handler(),
         ExitEvent.WORKEND : workend_handler(),
-        ExitEvent.CHECKPOINT : take_cpt()
     }
 )
 

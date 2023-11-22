@@ -38,14 +38,14 @@ from gem5.simulate.simulator import Simulator
 from gem5.simulate.simulator import ExitEvent
 from gem5.resources.resource import Resource, AbstractResource, DiskImageResource, KernelResource,obtain_resource
 from pathlib import Path
-from utils.NumaArmBoard import ArmDMBoard
+from utils.arm_gem5_board import ArmGem5DMBoard
 from gem5.components.memory.dram_interfaces.ddr4 import DDR4_2400_8x8
-from utils.RemoteMemory import RemoteChanneledMemory
+from utils.remote_memory import RemoteChanneledMemory
 
 from gem5.components.cachehierarchies.classic.no_cache import NoCache
 
 # Here we setup the parameters of the l1 and l2 caches.
-from utils.DMCache import ClassicPL1PL2DMCache
+from utils.dm_caches import ClassicPL1PL2DMCache
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -68,15 +68,15 @@ cache_hierarchy = ClassicPL1PL2DMCache(
 
 # Memory: Dual Channel DDR4 2400 DRAM device.
 
-local_memory = DualChannelDDR4_2400(size="512MB")
-remote_memory = SingleChannelDDR4_2400(size="8GB")
-# remote_memory = RemoteChanneledMemory(
-#         DDR4_2400_8x8,
-#         2,
-#         64,
-#         size="8GB",
-#         remote_offset_latency=750
-# )
+local_memory = DualChannelDDR4_2400(size="256MB")
+# remote_memory = SingleChannelDDR4_2400(size="2GB")
+remote_memory = RemoteChanneledMemory(
+        DDR4_2400_8x8,
+        2,
+        64,
+        size="8GB",
+        remote_offset_latency=750
+)
 
 # Here we setup the processor. We use a simple processor.
 if args.core_type == "kvm":
@@ -95,7 +95,7 @@ else:
 #     cache_hierarchy=cache_hierarchy,
 # )
 
-board = ArmDMBoard(
+board = ArmGem5DMBoard(
     clk_freq="3GHz",
     processor=processor,
     local_memory=local_memory,
@@ -114,8 +114,8 @@ board.set_kernel_disk_workload(
 
 def cpt_handler():
     print("got to m5 checkpoint")
-    m5.checkpoint(Path("/scr/studyztp/experiments/dm/atomic-bootup-cpt").as_posix())
-    yield True
+    m5.checkpoint(Path("/scr/studyztp/experiments/dm/bootup-cpt").as_posix())
+    yield False
 
 simulator = Simulator(
     board=board,
@@ -127,3 +127,4 @@ simulator = Simulator(
 simulator.run()
 
 print("Reach the end of script\n")
+

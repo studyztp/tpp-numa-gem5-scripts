@@ -38,9 +38,12 @@ from gem5.simulate.simulator import Simulator
 from gem5.simulate.simulator import ExitEvent
 from gem5.resources.resource import Resource, AbstractResource, DiskImageResource, KernelResource,obtain_resource
 from pathlib import Path
-from utils.NumaArmBoard import ArmDMBoard
 from gem5.components.memory.dram_interfaces.ddr4 import DDR4_2400_8x8
-from utils.RemoteMemory import RemoteChanneledMemory
+from utils.remote_memory import RemoteChanneledMemory
+from utils.arm_gem5_board import ArmGem5DMBoard
+from utils.remote_memory import RemoteChanneledMemory
+from gem5.components.processors.simple_switchable_processor import SimpleSwitchableProcessor
+from utils.dm_caches import ClassicPL1PL2DMCache
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -52,7 +55,6 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-from utils.DMCache import ClassicPL1PL2DMCache
 
 # Here we setup the parameters of the l1 and l2 caches.
 cache_hierarchy = ClassicPL1PL2DMCache(
@@ -74,10 +76,12 @@ remote_memory = RemoteChanneledMemory(
 
 # Here we setup the processor. We use a simple processor.
 processor = SimpleProcessor(
-    cpu_type=CPUTypes.TIMING, isa=ISA.ARM, num_cores=2
+    cpu_type=CPUTypes.TIMING, 
+    isa=ISA.ARM, 
+    num_cores=1
 )
 
-board = ArmDMBoard(
+board = ArmGem5DMBoard(
     clk_freq="3GHz",
     processor=processor,
     local_memory=local_memory,
@@ -138,7 +142,7 @@ simulator = Simulator(
     board=board,
     on_exit_event = {
         ExitEvent.WORKBEGIN : workbegin_handler(),
-        ExitEvent.WORKEND : workend_handler()
+        ExitEvent.WORKEND : workend_handler(),
     }
 )
 
